@@ -6,16 +6,29 @@ import CustomLinkCard from '@/components/CustomLinkCard';
 const processedLinks = new WeakSet<HTMLAnchorElement>();
 let linksReplacedCount = 0;
 
+// Function to extract slug from Polymarket URL
+function extractPolymarketSlug(linkText: string): string | null {
+    try {
+        // Extract slug from text like "polymarket.com/event/will-wld-hit-1pt3-by-december-31?tid=..."
+        // or full URL
+        const match = linkText.match(/polymarket\.com\/event\/([^?#\s]+)/i);
+        if (match && match[1]) {
+            return match[1];
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 // Function to check if a link matches your criteria
 function isTargetLink(linkElement: HTMLAnchorElement): boolean {
     try {
         const linkText = (linkElement.textContent || '').toLowerCase();
         const href = linkElement.href.toLowerCase();
 
-        // Match if:
-        // 1. Link text contains google.com (catches t.co shortened links)
-        // 2. OR actual href contains google.com (catches direct links)
-        return linkText.includes('google.com') || href.includes('google.com');
+        // Match if link text or href contains polymarket.com
+        return linkText.includes('polymarket.com') || href.includes('polymarket.com');
     } catch {
         return false;
     }
@@ -30,6 +43,14 @@ function replaceLinkWithCustomUI(linkElement: HTMLAnchorElement) {
     const url = linkElement.href;
     const displayUrl = linkElement.textContent || url;
 
+    // Extract slug from the link text
+    const slug = extractPolymarketSlug(displayUrl);
+
+    if (!slug) {
+        console.log('[X.com Extension] ⚠️ Could not extract slug from:', displayUrl);
+        return;
+    }
+
     // Mark as processed
     processedLinks.add(linkElement);
     linksReplacedCount++;
@@ -41,16 +62,17 @@ function replaceLinkWithCustomUI(linkElement: HTMLAnchorElement) {
     // Replace the original link with container
     linkElement.parentElement?.replaceChild(container, linkElement);
 
-    // Mount React component
+    // Mount React component with slug
     const root = ReactDOM.createRoot(container);
     root.render(
         <CustomLinkCard
             originalUrl={url}
             originalText={displayUrl}
+            slug={slug}
         />
     );
 
-    console.log('[X.com Extension] ✓ Replaced link:', displayUrl, '→', url);
+    console.log('[X.com Extension] ✓ Replaced Polymarket link:', displayUrl, '→', url, 'slug:', slug);
 }
 
 // Function to scan and replace links in a given element
@@ -66,16 +88,16 @@ function processLinks(element: HTMLElement) {
 
         if (isTargetLink(anchor) && !processedLinks.has(anchor)) {
             const linkText = anchor.textContent || '';
-            console.log('[X.com Extension] ✓ Matched link:', linkText, '→', anchor.href);
+            console.log('[X.com Extension] ✓ Matched Polymarket link:', linkText, '→', anchor.href);
             matchedCount++;
             replaceLinkWithCustomUI(anchor);
         }
     });
 
     if (matchedCount === 0 && links.length > 0) {
-        console.log('[X.com Extension] No matching links found in', links.length, 'total links');
+        console.log('[X.com Extension] No Polymarket links found in', links.length, 'total links');
     } else if (matchedCount > 0) {
-        console.log('[X.com Extension] Replaced', matchedCount, 'link(s)');
+        console.log('[X.com Extension] Replaced', matchedCount, 'Polymarket link(s)');
     }
 }
 
