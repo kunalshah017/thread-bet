@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Whispers-Extension",
+  "version": "1.0.0",
+  "description": "Injects Whispers UI into X.com",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://*.x.com/*",
+    "http://localhost:5173/"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": "public/vite.svg"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://*.x.com/*"],
+      "js": ["src/content.tsx"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*"],
+      "matches": ["https://x.com/*", "https://*.x.com/*"]
+    }
+  ]
+}
