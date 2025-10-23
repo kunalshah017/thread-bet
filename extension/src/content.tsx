@@ -1,6 +1,28 @@
+// IMPORTANT: Load polyfills first before any other imports
+import './polyfills';
+
 import ReactDOM from 'react-dom/client';
 import './content.css';
 import CustomLinkCard from '@/components/CustomLinkCard';
+
+// Inject inpage script to access window.ethereum
+function injectInpageScript() {
+    try {
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('src/inpage.js');
+        script.type = 'text/javascript';
+        script.onload = () => {
+            console.log('[Content] ✓ Inpage script injected');
+            script.remove(); // Clean up after loading
+        };
+        (document.head || document.documentElement).appendChild(script);
+    } catch (error) {
+        console.error('[Content] Failed to inject inpage script:', error);
+    }
+}
+
+// Inject the inpage script as early as possible
+injectInpageScript();
 
 // Track processed links to avoid duplicates
 const processedLinks = new WeakSet<HTMLAnchorElement>();
