@@ -20,11 +20,12 @@ import {
     checkUSDCBalance,
     checkUSDCAllowance,
     buildApprovalTransaction,
-    buildPolymarketOrder,
-    submitOrder,
     calculateExpectedShares,
     calculatePotentialProfit,
 } from '../lib/polymarketTrading';
+import {
+    backendExecuteTrade,
+} from '../lib/backendClient';
 
 interface CustomLinkCardProps {
     originalUrl: string;
@@ -45,6 +46,8 @@ interface PolymarketEvent {
         question: string;
         outcomes: string;
         outcomePrices: string;
+        clobTokenIds?: string; // JSON string array of token IDs
+        orderMinSize?: number; // Minimum order size in shares (not USDC)
     }>;
     tags: Array<{
         label: string;
@@ -66,6 +69,8 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
     const [tradeAmount, setTradeAmount] = useState<string>('10');
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingStep, setProcessingStep] = useState<string>('');
+    const [minOrderSize, setMinOrderSize] = useState<number>(5); // Min shares to buy
+    const [minUSDCRequired, setMinUSDCRequired] = useState<number>(5); // Min USDC needed
 
     useEffect(() => {
         fetchPolymarketData(slug);
@@ -159,6 +164,22 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
     // Handle Trade button click
     const handleTradeClick = (outcome: string) => {
         setSelectedOutcome(outcome);
+
+        // Calculate minimum USDC required for this outcome
+        const outcomes = eventData?.markets[0] ? parseOutcomes(
+            eventData.markets[0].outcomes,
+            eventData.markets[0].outcomePrices
+        ) : [];
+
+        const outcomeData = outcomes.find((o: { name: string; price: number }) => o.name === outcome);
+        if (outcomeData) {
+            // Min USDC = minOrderSize (shares) * price (as decimal)
+            const minUSDC = minOrderSize * (outcomeData.price / 100);
+            setMinUSDCRequired(minUSDC);
+            setTradeAmount(Math.max(minUSDC, 10).toFixed(2)); // Set default to min or $10, whichever is higher
+            console.log(`[Trade] Min order: ${minOrderSize} shares @ ${outcomeData.price}% = $${minUSDC.toFixed(2)} USDC`);
+        }
+
         setShowTradeModal(true);
     };
 
@@ -172,13 +193,6 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
             return;
         }
 
-        // Check balance
-        const balance = parseFloat(usdcBalance);
-        if (balance < amount) {
-            alert(`Insufficient USDC balance. You have $${balance.toFixed(2)} USDC.`);
-            return;
-        }
-
         // Get the outcome data
         const outcomes = eventData?.markets[0] ? parseOutcomes(
             eventData.markets[0].outcomes,
@@ -188,6 +202,20 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
         const outcome = outcomes.find((o: { name: string; price: number }) => o.name === selectedOutcome);
         if (!outcome) {
             alert('Invalid outcome selected');
+            return;
+        }
+
+        // Calculate minimum USDC required: minOrderSize (shares) * price
+        const calculatedMinUSDC = minOrderSize * (outcome.price / 100);
+        if (amount < calculatedMinUSDC) {
+            alert(`Minimum order size is ${minOrderSize} shares.\nThis requires at least $${calculatedMinUSDC.toFixed(2)} USDC at ${outcome.price.toFixed(1)}% price.`);
+            return;
+        }
+
+        // Check balance
+        const balance = parseFloat(usdcBalance);
+        if (balance < amount) {
+            alert(`Insufficient USDC balance.\n\nYou have: $${balance.toFixed(2)} USDC\nRequired: $${amount.toFixed(2)} USDC\nShortfall: $${(amount - balance).toFixed(2)} USDC`);
             return;
         }
 
@@ -273,79 +301,43 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
                 console.log('[Trade] ✓ USDC already approved');
             }
 
-            // Step 3: Build the order
-            setProcessingStep('Building order...');
-            console.log('[Trade] Building Polymarket order...');
+            // Step 3: Get the correct token ID based on selected outcome
+            setProcessingStep('Preparing order...');
+            console.log('[Trade] Getting token ID for outcome:', selectedOutcome);
 
-            // Get token ID from event data (first market, first outcome for now)
-            // In production, you'd extract the correct token ID based on the selected outcome
-            // For this MVP, we'll use a placeholder token ID
-            // TODO: Extract actual token ID from Polymarket API based on market/outcome
+            const market = eventData?.markets[0];
+            if (!market || !market.clobTokenIds) {
+                throw new Error('Market data not available');
+            }
 
-            const orderData = await buildPolymarketOrder({
-                tokenId: "21742633143463906290569050155826241533067272736897614950488156847949938836455", // Example token ID - replace with actual
-                side: "BUY",
+            // Parse clobTokenIds array: [0] = "Yes", [1] = "No"
+            const tokenIds = JSON.parse(market.clobTokenIds);
+            const outcomeIndex = selectedOutcome === 'Yes' ? 0 : 1;
+            const tokenId = tokenIds[outcomeIndex];
+
+            console.log('[Trade] Token ID:', tokenId);
+
+            // Step 4: Execute trade via backend
+            setProcessingStep('Executing trade via Vincent...');
+            console.log('[Trade] Calling backend API...');
+
+            const result = await backendExecuteTrade({
+                tokenId: tokenId,
+                side: 'BUY',
                 price: outcome.price / 100, // Convert percentage to 0-1
-                size: amount,
+                amount: amount,
                 userAddress: userAddress,
-            });
-
-            console.log('[Trade] Order built:', orderData);
-
-            // Step 4: Sign the order with EIP-712
-            setProcessingStep('Requesting signature...');
-            console.log('[Trade] Requesting EIP-712 signature...');
-
-            const signaturePromise = new Promise<string>((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Signature timeout'));
-                }, 120000); // 2 minute timeout
-
-                const handleSignResponse = (event: Event) => {
-                    clearTimeout(timeout);
-                    window.removeEventListener('WHISPERS_TYPED_DATA_RESPONSE', handleSignResponse);
-                    const customEvent = event as CustomEvent;
-
-                    if (customEvent.detail.success) {
-                        resolve(customEvent.detail.signature);
-                    } else {
-                        reject(new Error(customEvent.detail.error || 'Signature failed'));
-                    }
-                };
-
-                window.addEventListener('WHISPERS_TYPED_DATA_RESPONSE', handleSignResponse);
-            });
-
-            // Dispatch signing request
-            window.dispatchEvent(
-                new CustomEvent('WHISPERS_SIGN_TYPED_DATA', {
-                    detail: {
-                        domain: orderData.domain,
-                        types: orderData.types,
-                        message: orderData.order,
-                    },
-                })
-            );
-
-            const signature = await signaturePromise;
-            console.log('[Trade] ✓ Order signed');
-
-            // Step 5: Submit order to Polymarket CLOB
-            setProcessingStep('Submitting order to Polymarket...');
-            console.log('[Trade] Submitting to CLOB API...');
-
-            const result = await submitOrder({
-                order: orderData.order,
-                signature: signature,
+                pkpPublicKey: vincentAuth.pkpPublicKey,
+                authToken: 'mock-jwt-token', // TODO: Implement proper JWT auth
                 orderType: 'GTC',
-                ownerAddress: userAddress,
             });
 
             if (result.success) {
-                console.log('[Trade] ✓ Order placed! ID:', result.orderID);
+                console.log('[Trade] ✓ Order placed! ID:', result.orderId);
                 alert(
                     `✅ Trade placed successfully!\n\n` +
-                    `Order ID: ${result.orderID}\n` +
+                    `Order ID: ${result.orderId}\n` +
+                    `Signature: ${result.signature?.slice(0, 20)}...\n\n` +
                     `View on Polymarket.com`
                 );
 
@@ -392,6 +384,12 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
                     if (response.success) {
                         console.log('[CustomLinkCard] Data received:', response.data);
                         setEventData(response.data);
+
+                        // Set minimum order size (in shares) from market data
+                        if (response.data.markets?.[0]?.orderMinSize) {
+                            setMinOrderSize(response.data.markets[0].orderMinSize);
+                            console.log('[CustomLinkCard] Minimum order size (shares):', response.data.markets[0].orderMinSize);
+                        }
                     } else {
                         console.error('[CustomLinkCard] Fetch failed:', response.error);
                         setError(response.error);
@@ -598,6 +596,8 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
                                 <div className="trade-details">
                                     <p><strong>Market:</strong> {selectedOutcome}</p>
                                     <p><strong>Price:</strong> {outcomes.find((o: { name: string; price: number }) => o.name === selectedOutcome)?.price.toFixed(1)}%</p>
+                                    <p><strong>Min Order Size:</strong> {minOrderSize} shares (${minUSDCRequired.toFixed(2)} USDC)</p>
+                                    <p><strong>Your Balance:</strong> ${parseFloat(usdcBalance).toFixed(2)} USDC</p>
                                 </div>
                                 <div className="trade-input">
                                     <label>Amount (USDC):</label>
@@ -605,10 +605,20 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
                                         type="number"
                                         value={tradeAmount}
                                         onChange={(e) => setTradeAmount(e.target.value)}
-                                        min="1"
-                                        step="1"
-                                        placeholder="Enter USDC amount"
+                                        min={minUSDCRequired}
+                                        step="0.01"
+                                        placeholder={`Min: $${minUSDCRequired.toFixed(2)} USDC`}
                                     />
+                                    {parseFloat(tradeAmount) < minUSDCRequired && (
+                                        <p className="error-text">
+                                            ⚠️ Amount must be at least ${minUSDCRequired.toFixed(2)} USDC ({minOrderSize} shares @ {outcomes.find((o: { name: string; price: number }) => o.name === selectedOutcome)?.price.toFixed(1)}%)
+                                        </p>
+                                    )}
+                                    {parseFloat(tradeAmount) > parseFloat(usdcBalance) && (
+                                        <p className="error-text">
+                                            ⚠️ Insufficient balance. You need ${(parseFloat(tradeAmount) - parseFloat(usdcBalance)).toFixed(2)} more USDC.
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="modal-actions">
                                     <button
@@ -620,6 +630,7 @@ const CustomLinkCard: React.FC<CustomLinkCardProps> = ({ originalUrl, slug }) =>
                                     <button
                                         onClick={handleSubmitTrade}
                                         className="action-btn primary"
+                                        disabled={parseFloat(tradeAmount) < minUSDCRequired || parseFloat(tradeAmount) > parseFloat(usdcBalance)}
                                     >
                                         Confirm Trade
                                     </button>

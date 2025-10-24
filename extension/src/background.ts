@@ -91,35 +91,139 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
 
-  // Execute trade via Vincent
-  if (request.action === "executeTrade") {
-    const { order } = request;
+  // Execute trade via Vincent backend
+  if (request.action === "backendExecuteTrade") {
+    const { params } = request;
 
-    console.log("[Background] Executing trade:", order);
+    console.log("[Background] Executing trade via backend:", params);
 
     (async () => {
       try {
-        // TODO: Implement full trading flow:
-        // 1. Check USDC allowance
-        // 2. If needed, approve USDC
-        // 3. Build order transaction
-        // 4. Sign with Vincent PKP
-        // 5. Broadcast to Polygon
+        const BACKEND_URL = "http://localhost:3000";
 
-        // For MVP, simulate success
-        const mockTxHash = "0x" + Math.random().toString(16).slice(2, 66);
-
-        console.log("[Background] ✓ Trade executed (simulated)");
-        sendResponse({
-          success: true,
-          txHash: mockTxHash,
+        const response = await fetch(`${BACKEND_URL}/api/trade/execute`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${params.authToken || "mock-jwt-token"}`,
+          },
+          body: JSON.stringify({
+            tokenId: params.tokenId,
+            side: params.side,
+            price: params.price,
+            amount: params.amount,
+            userAddress: params.userAddress,
+            pkpPublicKey: params.pkpPublicKey,
+            orderType: params.orderType || "GTC",
+          }),
         });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(
+            errorData.error || `Trade failed: ${response.statusText}`
+          );
+        }
+
+        const result = await response.json();
+        console.log("[Background] ✓ Trade executed successfully");
+        sendResponse(result);
       } catch (error: unknown) {
         console.error("[Background] Trade execution failed:", error);
         sendResponse({
           success: false,
           error:
             error instanceof Error ? error.message : "Trade execution failed",
+        });
+      }
+    })();
+
+    return true; // Keep channel open for async response
+  }
+
+  // Check backend health
+  if (request.action === "backendHealthCheck") {
+    console.log("[Background] Checking backend health...");
+
+    (async () => {
+      try {
+        const BACKEND_URL = "http://localhost:3000";
+        const response = await fetch(`${BACKEND_URL}/health`);
+        const result = await response.json();
+        console.log("[Background] Backend health:", result);
+        sendResponse(result);
+      } catch (error: unknown) {
+        console.error("[Background] Health check failed:", error);
+        sendResponse({
+          status: "ERROR",
+          litInitialized: false,
+          error: error instanceof Error ? error.message : "Network error",
+        });
+      }
+    })();
+
+    return true; // Keep channel open for async response
+  }
+
+  // Get balance from backend
+  if (request.action === "backendGetBalance") {
+    const { address } = request;
+
+    console.log("[Background] Getting balance for:", address);
+
+    (async () => {
+      try {
+        const BACKEND_URL = "http://localhost:3000";
+        const response = await fetch(`${BACKEND_URL}/api/balance/${address}`);
+
+        if (!response.ok) {
+          throw new Error(`Balance check failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log("[Background] Balance:", result.balance);
+        sendResponse(result);
+      } catch (error: unknown) {
+        console.error("[Background] Balance check failed:", error);
+        sendResponse({
+          balance: "0",
+          error: error instanceof Error ? error.message : "Network error",
+        });
+      }
+    })();
+
+    return true; // Keep channel open for async response
+  }
+
+  // Precheck trade via backend
+  if (request.action === "backendPrecheck") {
+    const { params } = request;
+
+    console.log("[Background] Precheck trade:", params);
+
+    (async () => {
+      try {
+        const BACKEND_URL = "http://localhost:3000";
+        const response = await fetch(`${BACKEND_URL}/api/trade/precheck`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(params),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Precheck failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log("[Background] Precheck result:", result);
+        sendResponse(result);
+      } catch (error: unknown) {
+        console.error("[Background] Precheck failed:", error);
+        sendResponse({
+          success: false,
+          reason: error instanceof Error ? error.message : "Network error",
         });
       }
     })();

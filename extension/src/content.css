@@ -103,6 +103,17 @@
   background: white;
 }
 
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.action-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.95);
+  transform: none;
+}
+
 .expanded-content {
   margin-top: 12px;
   padding-top: 12px;
@@ -420,6 +431,13 @@
   outline: none;
   border-color: #fbbf24;
   background: rgba(255, 255, 255, 0.2);
+}
+
+.trade-input .error-text {
+  color: #fca5a5;
+  font-size: 12px;
+  margin-top: 6px;
+  font-weight: 500;
 }
 
 .modal-actions {

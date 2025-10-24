@@ -37,6 +37,10 @@ export interface StoredVincentAuth {
   pkpTokenId: string;
   authMethodType: string;
   timestamp: number;
+  // Polymarket API credentials (optional, cached after first creation)
+  polymarketApiKey?: string;
+  polymarketApiSecret?: string;
+  polymarketApiPassphrase?: string;
 }
 
 /**
