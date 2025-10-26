@@ -17,6 +17,10 @@ export default defineConfig({
           src: "src/inpage.js",
           dest: "src",
         },
+        {
+          src: "src/success.html",
+          dest: "src",
+        },
       ],
     }),
   ],

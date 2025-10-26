@@ -27,8 +27,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/*", "src/inpage.js"],
-      "matches": ["https://x.com/*", "https://*.x.com/*"]
+      "resources": ["assets/*", "src/inpage.js", "src/success.html"],
+      "matches": [
+        "https://x.com/*",
+        "https://*.x.com/*",
+        "http://localhost:3000/*"
+      ]
     }
   ]
 }
