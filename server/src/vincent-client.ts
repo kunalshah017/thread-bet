@@ -69,14 +69,6 @@ export function getDelegateeSigner(): ethers.Wallet {
  *
  * NOTE: In production, this would use Lit Actions and session signatures
  * For MVP, we'll simulate this with direct signing
- *
- * ⚠️ IMPORTANT FOR MVP: Since this returns the delegatee signer,
- * the DELEGATEE WALLET must have:
- * - USDC balance >= order amount
- * - USDC allowance for Polymarket exchanges
- *
- * Run: npx ts-node scripts/set-allowances.ts
- * And: Transfer USDC.e to delegatee wallet (0x52c0344AAad255CfCac1C19D04F8647230224326)
  */
 export async function getPKPSigner(
   pkpPublicKey: string,
@@ -98,9 +90,6 @@ export async function getPKPSigner(
 
   console.warn(
     "[Vincent Client] ⚠️  Using delegatee signer for MVP (should be PKP in production)"
-  );
-  console.warn(
-    "[Vincent Client] ⚠️  Delegatee wallet must have USDC + allowances for Polymarket"
   );
 
   return delegateeSigner;

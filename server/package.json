@@ -12,8 +12,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@lit-protocol/lit-node-client": "^7.3.1",
     "@lit-protocol/vincent-app-sdk": "^2.2.3",
     "@polymarket/clob-client": "^4.22.8",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "ethers": "^5.7.2",

@@ -50,7 +50,8 @@ export const polymarketTradeAbilitySchema = {
       amount: {
         type: "number",
         minimum: 1,
-        description: "Amount in USDC",
+        description:
+          "For BUY orders: USDC amount to spend. For SELL orders: Number of shares to sell",
       },
       orderType: {
         type: "string",
@@ -239,6 +240,13 @@ export async function polymarketTradePrecheck(params: {
 
 /**
  * Build Polymarket order structure
+ *
+ * @param tokenId - Polymarket outcome token ID
+ * @param side - BUY or SELL
+ * @param price - Price as decimal (0.01 to 0.99)
+ * @param amount - For BUY: USDC to spend. For SELL: Number of shares to sell
+ * @param userAddress - Wallet address placing the order
+ * @param nonce - Optional nonce for the order
  */
 function buildPolymarketOrder(params: {
   tokenId: string;
@@ -255,14 +263,29 @@ function buildPolymarketOrder(params: {
   const { tokenId, side, price, amount, userAddress, nonce } = params;
 
   // Calculate maker/taker amounts
-  const amountBN = ethers.utils.parseUnits(amount.toString(), 6); // USDC has 6 decimals
-  const shares = amount / price;
-  const sharesBN = ethers.utils.parseUnits(shares.toFixed(6), 6);
+  // For BUY: amount = USDC to spend, calculate shares = USDC / price
+  // For SELL: amount = shares to sell, calculate USDC = shares * price
 
-  const makerAmount =
-    side === "BUY" ? amountBN.toString() : sharesBN.toString();
-  const takerAmount =
-    side === "BUY" ? sharesBN.toString() : amountBN.toString();
+  let makerAmount: string;
+  let takerAmount: string;
+
+  if (side === "BUY") {
+    // Buying shares with USDC
+    const usdcBN = ethers.utils.parseUnits(amount.toString(), 6);
+    const shares = amount / price;
+    const sharesBN = ethers.utils.parseUnits(shares.toFixed(6), 6);
+
+    makerAmount = usdcBN.toString(); // Giving USDC
+    takerAmount = sharesBN.toString(); // Receiving shares
+  } else {
+    // Selling shares for USDC
+    const sharesBN = ethers.utils.parseUnits(amount.toString(), 6);
+    const usdcReceived = amount * price;
+    const usdcBN = ethers.utils.parseUnits(usdcReceived.toFixed(6), 6);
+
+    makerAmount = sharesBN.toString(); // Giving shares
+    takerAmount = usdcBN.toString(); // Receiving USDC
+  }
 
   // Build order
   const order = {
@@ -331,51 +354,18 @@ export async function polymarketTradeExecute(params: {
   };
   delegatorPkpEthAddress: string;
   pkpSigner: ethers.Signer; // The PKP wallet signer (provided by Lit)
-  userAddress?: string; // Optional: If provided, this address will be the maker (must have funds)
 }): Promise<{
   success: boolean;
   orderId?: string;
   error?: string;
   signature?: string;
 }> {
-  const { abilityParams, delegatorPkpEthAddress, pkpSigner, userAddress } =
-    params;
+  const { abilityParams, delegatorPkpEthAddress, pkpSigner } = params;
 
   try {
-    console.log("[Polymarket Ability] Building order...");
+    console.log("[Polymarket Ability] Preparing order...");
 
-    // Use userAddress if provided (for MetaMask flow), otherwise use PKP address
-    const makerAddress = userAddress || delegatorPkpEthAddress;
-    console.log("[Polymarket Ability] Maker address:", makerAddress);
-
-    // 1. Build order structure
-    const { order, domain, types } = buildPolymarketOrder({
-      tokenId: abilityParams.tokenId,
-      side: abilityParams.side,
-      price: abilityParams.price,
-      amount: abilityParams.amount,
-      userAddress: makerAddress,
-    });
-
-    console.log("[Polymarket Ability] Order built:", {
-      side: abilityParams.side,
-      price: abilityParams.price,
-      amount: abilityParams.amount,
-    });
-
-    // 2. Sign order with PKP
-    console.log("[Polymarket Ability] Signing order with PKP...");
-
-    // Type assertion for _signTypedData (it exists on Wallet but not on base Signer interface)
-    const signature = await (pkpSigner as any)._signTypedData(
-      domain,
-      types,
-      order
-    );
-
-    console.log("[Polymarket Ability] ✓ Order signed");
-
-    // 3. Get API credentials (try env vars first, then create if needed)
+    // 1. Get API credentials (try env vars first, then create if needed)
     console.log("[Polymarket Ability] Getting API credentials...");
 
     let apiCreds = params.userParams;
@@ -468,17 +458,32 @@ export async function polymarketTradeExecute(params: {
       }
     );
 
-    // 5. Create and post the order
+    // 5. Create and post the order using the high-level API
     console.log("[Polymarket Ability] Creating order...");
+
+    // Calculate the number of shares based on USDC amount and price
+    // For BUY: shares = USDC / price
+    // For SELL: USDC = shares * price (so shares = amount passed in)
+    const shares =
+      abilityParams.side === "BUY"
+        ? abilityParams.amount / abilityParams.price
+        : abilityParams.amount;
 
     const userOrder = {
       tokenID: abilityParams.tokenId,
       price: abilityParams.price,
-      size: abilityParams.amount,
+      size: shares, // Size in SHARES, not USDC
       side: abilityParams.side as any, // "BUY" or "SELL"
     };
 
-    // Use createAndPostOrder which handles both signing and submission
+    console.log("[Polymarket Ability] Order params:", {
+      price: userOrder.price,
+      size: userOrder.size,
+      side: userOrder.side,
+      usdcAmount: abilityParams.amount,
+    });
+
+    // Use createAndPostOrder which handles signing and submission
     const response = await clobClient.createAndPostOrder(userOrder);
 
     console.log("[Polymarket Ability] ✓ Order submitted successfully");
@@ -487,7 +492,6 @@ export async function polymarketTradeExecute(params: {
     // 6. Return success with order details
     return {
       success: true,
-      signature,
       orderId: response.orderID,
     };
   } catch (error) {

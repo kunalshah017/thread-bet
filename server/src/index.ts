@@ -20,6 +20,12 @@ import {
   polymarketTradePrecheck,
   polymarketTradeExecute,
 } from "./abilities/polymarket-trade";
+import {
+  getConnectPageUrl,
+  handleAuthCallback,
+  verifyRequestJWT,
+} from "./vincent-auth";
+import { UserDB, TradeDB, BalanceDB } from "./database";
 
 // Load environment variables
 dotenv.config();
@@ -88,6 +94,147 @@ app.get("/api/config", (req: Request, res: Response) => {
     network: config.litNetwork,
   });
 });
+
+// ========================================
+// Vincent Authentication Routes
+// ========================================
+
+/**
+ * Get Vincent connect page URL
+ * Frontend uses this to redirect users to Vincent Dashboard
+ */
+app.get("/auth/connect-url", (req: Request, res: Response) => {
+  try {
+    const url = getConnectPageUrl();
+    res.json({ url });
+  } catch (error) {
+    console.error("[Auth] Error getting connect URL:", error);
+    res.status(500).json({ error: "Failed to get connect URL" });
+  }
+});
+
+/**
+ * OAuth callback handler
+ * Vincent Dashboard redirects here with JWT after user grants permission
+ */
+app.get("/auth/callback", async (req: Request, res: Response) => {
+  try {
+    const { jwt } = req.query;
+
+    if (!jwt || typeof jwt !== "string") {
+      return res.status(400).json({ error: "Missing JWT parameter" });
+    }
+
+    console.log("[Auth] Processing callback with JWT...");
+    const user = await handleAuthCallback(jwt);
+
+    // Redirect back to extension with success
+    // You'll need to update this with your actual extension ID
+    res.redirect(
+      `http://localhost:5173/auth/success?pkp=${
+        user.pkp_address
+      }&jwt=${encodeURIComponent(jwt)}`
+    );
+  } catch (error: any) {
+    console.error("[Auth] Callback error:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * Get current user info
+ * Protected route - requires valid JWT
+ */
+app.get("/api/user/me", async (req: Request, res: Response) => {
+  try {
+    const { user } = await verifyRequestJWT(req.headers.authorization);
+
+    res.json({
+      pkpAddress: user.pkp_address,
+      authMethod: user.auth_method,
+      createdAt: user.created_at,
+    });
+  } catch (error: any) {
+    console.error("[API] /user/me error:", error);
+    res.status(401).json({ error: error.message });
+  }
+});
+
+/**
+ * Get wallet balances
+ * Protected route - requires valid JWT
+ */
+app.get("/api/wallet/balance", async (req: Request, res: Response) => {
+  try {
+    const { user } = await verifyRequestJWT(req.headers.authorization);
+
+    // Check if cached balance is stale (older than 30 seconds)
+    let balance = BalanceDB.get(user.id);
+
+    if (BalanceDB.isStale(balance)) {
+      console.log(`[API] Fetching fresh balances for user ${user.id}...`);
+
+      // Fetch fresh balances
+      const provider = new ethers.providers.JsonRpcProvider(
+        process.env.POLYGON_RPC || "https://polygon-rpc.com"
+      );
+
+      // Get POL balance
+      const polBalance = await provider.getBalance(user.pkp_address);
+
+      // Get USDC balance (Polygon USDC: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359)
+      const usdcAddress =
+        process.env.USDC_ADDRESS ||
+        "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+      const usdcContract = new ethers.Contract(
+        usdcAddress,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+      const usdcBalance = await usdcContract.balanceOf(user.pkp_address);
+
+      // Update database
+      balance = BalanceDB.update(
+        user.id,
+        ethers.utils.formatUnits(usdcBalance, 6),
+        ethers.utils.formatEther(polBalance)
+      );
+    }
+
+    if (!balance) {
+      throw new Error("Failed to fetch balance");
+    }
+
+    res.json({
+      pkpAddress: user.pkp_address,
+      usdc: balance.usdc_balance,
+      pol: balance.pol_balance,
+      lastUpdated: balance.last_updated_at,
+    });
+  } catch (error: any) {
+    console.error("[API] /wallet/balance error:", error);
+    res.status(401).json({ error: error.message });
+  }
+});
+
+/**
+ * Get user's trade history
+ * Protected route - requires valid JWT
+ */
+app.get("/api/trades", async (req: Request, res: Response) => {
+  try {
+    const { user } = await verifyRequestJWT(req.headers.authorization);
+    const trades = TradeDB.getByUserId(user.id);
+    res.json({ trades });
+  } catch (error: any) {
+    console.error("[API] /trades error:", error);
+    res.status(401).json({ error: error.message });
+  }
+});
+
+// ========================================
+// Trading Routes
+// ========================================
 
 /**
  * Precheck endpoint - Validates if a trade can be executed
