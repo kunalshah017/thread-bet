@@ -1,0 +1,47 @@
+{
+  "name": "@kunalshah017/vincent-ability-polymarket-trade",
+  "version": "1.0.1",
+  "description": "Vincent Ability for trading on Polymarket prediction markets",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "vincent-ability-metadata.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "vincent",
+    "lit-protocol",
+    "polymarket",
+    "prediction-markets",
+    "defi",
+    "ability"
+  ],
+  "author": "Whispers Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kunalshah017/thread-bet.git",
+    "directory": "vincent-ability-polymarket"
+  },
+  "peerDependencies": {
+    "@lit-protocol/vincent-ability-sdk": ">=2.0.0",
+    "@polymarket/clob-client": ">=4.0.0",
+    "ethers": "^5.7.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@lit-protocol/vincent-ability-sdk": "^2.2.3",
+    "@polymarket/clob-client": "^4.22.8",
+    "@types/node": "^20.0.0",
+    "ethers": "^5.7.2",
+    "typescript": "^5.3.0",
+    "zod": "^3.22.4"
+  }
+}
